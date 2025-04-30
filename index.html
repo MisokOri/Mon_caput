@@ -1,0 +1,782 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dashboard Monitoring Caput (Auto Refresh)</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- PapaParse untuk parsing CSV -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+  <!-- SheetJS untuk export ke Excel -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            'status-aman': '#d4edda',
+            'status-belum': '#fff3cd',
+            'status-perbaiki': '#f8d7da',
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="bg-gray-100">
+  <div class="container mx-auto px-4 pt-10 max-w-6xl">
+    <h1 class="text-3xl font-bold text-center mb-6">Monitoring Penyampaian Caput</h1>
+    <div class="bg-white rounded-lg shadow p-6">
+      <!-- File Input and Settings -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        <div>
+          <label for="csv-path" class="block text-sm font-medium text-gray-700 mb-2">Path File CSV Lokal:</label>
+          <div class="flex">
+            <input type="text" id="csv-path" class="flex-grow rounded-l border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500" 
+                  placeholder="Contoh: ./data/monitoring.csv" value="caput.csv">
+            <button id="load-csv" class="bg-blue-500 hover:bg-blue-600 text-white py-2 px-4 rounded-r">
+              Load
+            </button>
+          </div>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-2">Pengaturan Refresh:</label>
+          <div class="flex items-center space-x-2">
+            <div class="flex items-center">
+              <input type="checkbox" id="auto-refresh" class="rounded text-blue-500 focus:ring-blue-500 h-4 w-4">
+              <label for="auto-refresh" class="ml-2 text-sm text-gray-700">Auto Refresh</label>
+            </div>
+            <input type="number" id="refresh-interval" min="5" value="30" 
+                  class="w-16 rounded border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500">
+            <span class="text-sm text-gray-700">detik</span>
+            <button id="refresh-now" class="bg-green-500 hover:bg-green-600 text-white py-1 px-3 rounded text-sm ml-2">
+              Refresh Sekarang
+            </button>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Upload fallback jika diperlukan -->
+      <div class="mb-4 bg-gray-50 p-3 rounded-lg border border-gray-200">
+        <div class="flex items-center mb-2">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-500 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <span class="text-sm font-medium text-gray-700">Atau upload CSV secara manual:</span>
+        </div>
+        <input type="file" id="upload-csv" accept=".csv" class="block w-full text-sm text-gray-500
+          file:mr-4 file:py-2 file:px-4
+          file:rounded-md file:border-0
+          file:text-sm file:font-semibold
+          file:bg-blue-50 file:text-blue-700
+          hover:file:bg-blue-100">
+      </div>
+      
+      <!-- Search and Actions Row -->
+      <div class="flex flex-col md:flex-row justify-between items-start md:items-center mt-4 mb-2 gap-4">
+        <!-- Search Box -->
+        <div class="w-full md:w-1/2">
+          <div class="relative">
+            <input type="text" id="search-box" placeholder="Cari Kode/Nama Satker..." 
+                  class="pl-10 pr-4 py-2 w-full rounded border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500">
+            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+              <svg class="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd" />
+              </svg>
+            </div>
+            <button id="clear-search" class="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 hidden">
+              <svg class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
+              </svg>
+            </button>
+          </div>
+        </div>
+        
+        <!-- Status and Action buttons -->
+        <div class="flex items-center space-x-2 w-full md:w-auto">
+          <div id="last-updated" class="text-sm text-gray-600 mr-2">
+            Belum ada data
+          </div>
+          <button id="export-excel" class="bg-green-500 hover:bg-green-600 text-white py-2 px-4 rounded disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+            Export ke Excel
+          </button>
+        </div>
+      </div>
+      
+      <!-- Search Info and Instruction -->
+      <div class="flex justify-between items-center my-2">
+        <div id="search-info" class="text-sm text-gray-600 hidden">
+          <!-- Search results info akan muncul di sini -->
+        </div>
+        <div class="text-sm text-gray-600">
+          <span>Klik pada status untuk mengubahnya</span>
+        </div>
+      </div>
+      
+      <!-- Data Table -->
+      <div class="mt-4 overflow-x-auto">
+        <table id="table-data" class="min-w-full border border-gray-200 divide-y divide-gray-200">
+          <thead class="bg-blue-100">
+            <tr>
+              <th class="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Kode Satker</th>
+              <th class="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Nama Satker</th>
+              <th class="px-6 py-3 text-center text-xs font-medium text-gray-700 uppercase tracking-wider">Jan</th>
+              <th class="px-6 py-3 text-center text-xs font-medium text-gray-700 uppercase tracking-wider">Feb</th>
+              <th class="px-6 py-3 text-center text-xs font-medium text-gray-700 uppercase tracking-wider">Mar</th>
+            </tr>
+          </thead>
+          <tbody class="bg-white divide-y divide-gray-200">
+            <!-- Data akan muncul di sini -->
+          </tbody>
+        </table>
+      </div>
+      
+      <!-- Pagination Controls -->
+      <div class="flex justify-between items-center mt-4">
+        <div>
+          <span id="pagination-info" class="text-sm text-gray-600">
+            Menampilkan 0 dari 0 satker
+          </span>
+        </div>
+        <div class="flex space-x-2">
+          <button id="prev-page" class="bg-gray-200 hover:bg-gray-300 text-gray-700 py-1 px-3 rounded text-sm disabled:opacity-50 disabled:cursor-not-allowed">
+            « Sebelumnya
+          </button>
+          <button id="next-page" class="bg-gray-200 hover:bg-gray-300 text-gray-700 py-1 px-3 rounded text-sm disabled:opacity-50 disabled:cursor-not-allowed">
+            Berikutnya »
+          </button>
+        </div>
+      </div>
+      
+      <!-- Dropdown untuk update status -->
+      <div id="status-dropdown" class="hidden absolute z-10 bg-white shadow-lg rounded-md overflow-hidden border border-gray-200">
+        <div class="py-1">
+          <button class="status-option w-full text-left px-4 py-2 text-sm hover:bg-gray-100" data-status="✅">✅ Aman</button>
+          <button class="status-option w-full text-left px-4 py-2 text-sm hover:bg-gray-100" data-status="⚠️">⚠️ Belum</button>
+          <button class="status-option w-full text-left px-4 py-2 text-sm hover:bg-gray-100" data-status="❌">❌ Perlu Perbaikan</button>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Notification toast -->
+    <div id="notification" class="fixed top-4 right-4 max-w-xs bg-white border border-gray-200 rounded-lg shadow-lg transform transition-all duration-300 scale-0 opacity-0">
+      <div class="p-4">
+        <div class="flex items-start">
+          <div id="notification-icon" class="flex-shrink-0">
+            <!-- Icon will be inserted here -->
+          </div>
+          <div class="ml-3 w-0 flex-1">
+            <p id="notification-message" class="text-sm font-medium text-gray-900"></p>
+          </div>
+          <div class="ml-4 flex-shrink-0 flex">
+            <button id="close-notification" class="inline-flex text-gray-400 hover:text-gray-500">
+              <span class="sr-only">Close</span>
+              <svg class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+// Variabel global
+let allData = []; // Menyimpan semua data asli
+let filteredData = []; // Menyimpan data satker yang belum aman semua
+let searchResults = []; // Menyimpan hasil pencarian
+let currentPage = 0;
+const pageSize = 10; // 10 satker per tampilan
+let pageChangeIntervalID; // Interval untuk pergantian halaman
+let refreshIntervalID; // Interval untuk auto refresh
+let currentCell = null; // Untuk menyimpan referensi ke sel yang sedang diupdate
+let autoPageChange = true; // Flag untuk kontrol pergantian halaman otomatis
+let lastLoadedFile = ""; // Melacak file yang terakhir di-load
+let dataSaved = false; // Status apakah data sudah disimpan
+let isSearchActive = false; // Status apakah pencarian sedang aktif
+
+// Element references
+const csvPathInput = document.getElementById('csv-path');
+const loadCsvBtn = document.getElementById('load-csv');
+const uploadCsvInput = document.getElementById('upload-csv');
+const autoRefreshCheckbox = document.getElementById('auto-refresh');
+const refreshIntervalInput = document.getElementById('refresh-interval');
+const refreshNowBtn = document.getElementById('refresh-now');
+const exportExcelBtn = document.getElementById('export-excel');
+const lastUpdatedEl = document.getElementById('last-updated');
+const paginationInfoEl = document.getElementById('pagination-info');
+const prevPageBtn = document.getElementById('prev-page');
+const nextPageBtn = document.getElementById('next-page');
+const searchBox = document.getElementById('search-box');
+const clearSearchBtn = document.getElementById('clear-search');
+const searchInfoEl = document.getElementById('search-info');
+
+// Event Listeners
+loadCsvBtn.addEventListener('click', loadCsvFromPath);
+refreshNowBtn.addEventListener('click', loadCsvFromPath);
+uploadCsvInput.addEventListener('change', handleFileUpload);
+autoRefreshCheckbox.addEventListener('change', toggleAutoRefresh);
+prevPageBtn.addEventListener('click', prevPage);
+nextPageBtn.addEventListener('click', nextPage);
+exportExcelBtn.addEventListener('click', exportToExcel);
+searchBox.addEventListener('input', handleSearch);
+clearSearchBtn.addEventListener('click', clearSearch);
+
+// Coba load CSV saat halaman dimuat
+window.addEventListener('DOMContentLoaded', () => {
+  // Delay sedikit untuk memastikan halaman sudah siap
+  setTimeout(() => {
+    loadCsvFromPath();
+  }, 500);
+});
+
+// Fungsi untuk memuat CSV dari path yang ditentukan
+function loadCsvFromPath() {
+  const path = csvPathInput.value.trim();
+  if (!path) {
+    showNotification('⚠️ Path file CSV tidak boleh kosong', 'warning');
+    return;
+  }
+
+  // Perbarui path terakhir
+  lastLoadedFile = path;
+  
+  // Tampilkan loading state
+  lastUpdatedEl.textContent = 'Memuat data...';
+  
+  // Fetch file CSV
+  fetch(path)
+    .then(response => {
+      if (!response.ok) {
+        throw new Error(`HTTP error! Status: ${response.status}`);
+      }
+      return response.text();
+    })
+    .then(data => {
+      processCsvData(data);
+      const now = new Date();
+      lastUpdatedEl.textContent = `Terakhir diperbarui: ${formatDateTime(now)}`;
+      showNotification('✅ Data berhasil dimuat', 'success');
+      
+      // Reset pencarian jika ada
+      if (isSearchActive) {
+        clearSearch();
+      }
+    })
+    .catch(error => {
+      console.error('Error loading CSV:', error);
+      lastUpdatedEl.textContent = 'Gagal memuat data';
+      showNotification('❌ Gagal memuat file CSV. Periksa path dan pastikan server mendukung file lokal.', 'error');
+    });
+}
+
+// Fungsi untuk menangani upload file CSV secara manual
+function handleFileUpload(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  
+  lastUpdatedEl.textContent = 'Memuat data...';
+  Papa.parse(file, {
+    header: true,
+    skipEmptyLines: true,
+    complete: function(results) {
+      allData = results.data;
+      
+      // Reset pencarian jika ada
+      if (isSearchActive) {
+        clearSearch();
+      } else {
+        filterAndDisplayData();
+      }
+      
+      exportExcelBtn.disabled = false;
+      
+      const now = new Date();
+      lastUpdatedEl.textContent = `Terakhir diperbarui: ${formatDateTime(now)}`;
+      
+      // Reset interval pergantian halaman
+      setupPageChangeInterval();
+      
+      // Aktifkan export
+      exportExcelBtn.disabled = false;
+      
+      showNotification('✅ Data berhasil dimuat', 'success');
+    },
+    error: function(error) {
+      console.error('Error parsing CSV:', error);
+      showNotification('❌ Gagal memproses file CSV', 'error');
+    }
+  });
+}
+
+// Fungsi untuk memproses data CSV
+function processCsvData(csvText) {
+  Papa.parse(csvText, {
+    header: true,
+    skipEmptyLines: true,
+    complete: function(results) {
+      allData = results.data;
+      
+      // Reset pencarian jika ada
+      if (isSearchActive) {
+        clearSearch();
+      } else {
+        filterAndDisplayData();
+      }
+      
+      // Aktifkan export
+      exportExcelBtn.disabled = false;
+      
+      // Atur interval pergantian halaman
+      setupPageChangeInterval();
+    },
+    error: function(error) {
+      console.error('Error parsing CSV:', error);
+      showNotification('❌ Gagal memproses file CSV', 'error');
+    }
+  });
+}
+
+// Mengatur interval pergantian halaman
+function setupPageChangeInterval() {
+  if (pageChangeIntervalID) {
+    clearInterval(pageChangeIntervalID);
+  }
+  
+  pageChangeIntervalID = setInterval(() => {
+    if (autoPageChange && !isSearchActive && filteredData.length > pageSize) {
+      nextPage();
+    }
+  }, 10000); // Ganti halaman tiap 10 detik
+}
+
+// Toggle auto refresh
+function toggleAutoRefresh() {
+  if (autoRefreshCheckbox.checked) {
+    const interval = parseInt(refreshIntervalInput.value) || 30;
+    refreshIntervalID = setInterval(() => {
+      loadCsvFromPath();
+    }, interval * 1000);
+    showNotification(`🔄 Auto refresh diaktifkan (${interval} detik)`, 'info');
+  } else {
+    if (refreshIntervalID) {
+      clearInterval(refreshIntervalID);
+      refreshIntervalID = null;
+    }
+    showNotification('🔄 Auto refresh dinonaktifkan', 'info');
+  }
+}
+
+// Fungsi pencarian
+function handleSearch(e) {
+  const searchTerm = e.target.value.trim().toLowerCase();
+  
+  if (searchTerm === '') {
+    clearSearch();
+    return;
+  }
+  
+  // Aktifkan tombol hapus pencarian
+  clearSearchBtn.classList.remove('hidden');
+  
+  // Tandai pencarian sedang aktif
+  isSearchActive = true;
+  
+  // Cari di semua data
+  searchResults = allData.filter(row => {
+    if (!row) return false;
+    
+    const kodeSatker = (row["Kode Satker"] || "").toString().toLowerCase();
+    const namaSatker = (row["Nama Satker"] || "").toString().toLowerCase();
+    
+    return kodeSatker.includes(searchTerm) || namaSatker.includes(searchTerm);
+  });
+  
+  // Reset halaman
+  currentPage = 0;
+  
+  // Tampilkan hasil
+  displaySearchResults();
+  
+  // Update info pencarian
+  searchInfoEl.textContent = `Ditemukan ${searchResults.length} satker dengan kata kunci "${searchTerm}"`;
+  searchInfoEl.classList.remove('hidden');
+}
+
+// Menampilkan hasil pencarian
+function displaySearchResults() {
+  const tbody = document.querySelector('#table-data tbody');
+  tbody.innerHTML = "";
+  
+  if (searchResults.length === 0) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td colspan="5" class="px-6 py-4 text-center text-sm text-gray-500">
+        Tidak ada hasil yang cocok dengan pencarian Anda
+      </td>
+    `;
+    tbody.appendChild(tr);
+    
+    // Update pagination info
+    paginationInfoEl.textContent = `Menampilkan 0 dari 0 satker`;
+    
+    // Update pagination button states
+    prevPageBtn.disabled = true;
+    nextPageBtn.disabled = true;
+    
+    return;
+  }
+  
+  const start = currentPage * pageSize;
+  const end = Math.min(start + pageSize, searchResults.length);
+  const pageData = searchResults.slice(start, end);
+  
+  pageData.forEach((row, rowIndex) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${row["Kode Satker"] || ""}</td>
+      <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${row["Nama Satker"] || ""}</td>
+      <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-center ${tailwindStatusClass(row["Jan"])}" 
+          data-month="Jan" data-row="${start + rowIndex}" data-search="true">${row["Jan"] || ""}</td>
+      <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-center ${tailwindStatusClass(row["Feb"])}" 
+          data-month="Feb" data-row="${start + rowIndex}" data-search="true">${row["Feb"] || ""}</td>
+      <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-center ${tailwindStatusClass(row["Mar"])}" 
+          data-month="Mar" data-row="${start + rowIndex}" data-search="true">${row["Mar"] || ""}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+  
+  // Update pagination info
+  paginationInfoEl.textContent = `Menampilkan ${start + 1}-${end} dari ${searchResults.length} satker`;
+  
+  // Tambahkan event click untuk sel status
+  document.querySelectorAll('#table-data td[data-month]').forEach(cell => {
+    cell.classList.add('cursor-pointer', 'hover:bg-gray-50');
+    cell.addEventListener('click', showStatusDropdown);
+  });
+  
+  // Update pagination button states
+  const maxPage = Math.ceil(searchResults.length / pageSize) - 1;
+  prevPageBtn.disabled = currentPage <= 0;
+  nextPageBtn.disabled = currentPage >= maxPage;
+}
+
+// Clear search
+function clearSearch() {
+  searchBox.value = '';
+  clearSearchBtn.classList.add('hidden');
+  searchInfoEl.classList.add('hidden');
+  isSearchActive = false;
+  currentPage = 0;
+  
+  // Tampilkan data yang difilter
+  filterAndDisplayData();
+}
+
+// Filter data yang belum aman semua
+function filterAndDisplayData() {
+  filteredData = [];
+  if (!allData || !Array.isArray(allData)) {
+    return;
+  }
+  
+  allData.forEach(row => {
+    if (!row) return;
+    
+    const statuses = [row["Jan"], row["Feb"], row["Mar"]].map(s => {
+      return s ? s.trim().toLowerCase() : "";
+    });
+    const allAman = statuses.every(status => status.includes("✅") || status.includes("aman"));
+    if (!allAman) {
+      filteredData.push(row);
+    }
+  });
+  
+  currentPage = 0; // Reset ke halaman pertama
+  displayPage();
+  updatePaginationControls();
+}
+
+// Menampilkan halaman saat ini
+function displayPage() {
+  const tbody = document.querySelector('#table-data tbody');
+  tbody.innerHTML = "";
+  
+  if (filteredData.length === 0) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td colspan="5" class="px-6 py-4 text-center text-sm text-gray-500">
+        Tidak ada data yang ditampilkan. Semua satker sudah aman atau belum ada data.
+      </td>
+    `;
+    tbody.appendChild(tr);
+    return;
+  }
+  
+  const start = currentPage * pageSize;
+  const end = Math.min(start + pageSize, filteredData.length);
+  const pageData = filteredData.slice(start, end);
+  
+  pageData.forEach((row, rowIndex) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${row["Kode Satker"] || ""}</td>
+      <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${row["Nama Satker"] || ""}</td>
+      <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-center ${tailwindStatusClass(row["Jan"])}" 
+          data-month="Jan" data-row="${start + rowIndex}">${row["Jan"] || ""}</td>
+      <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-center ${tailwindStatusClass(row["Feb"])}" 
+          data-month="Feb" data-row="${start + rowIndex}">${row["Feb"] || ""}</td>
+      <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-center ${tailwindStatusClass(row["Mar"])}" 
+          data-month="Mar" data-row="${start + rowIndex}">${row["Mar"] || ""}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+  
+  // Update pagination info
+  paginationInfoEl.textContent = `Menampilkan ${start + 1}-${end} dari ${filteredData.length} satker`;
+  
+  // Tambahkan event click untuk sel status
+  document.querySelectorAll('#table-data td[data-month]').forEach(cell => {
+    cell.classList.add('cursor-pointer', 'hover:bg-gray-50');
+    cell.addEventListener('click', showStatusDropdown);
+  });
+  
+  // Update pagination button states
+  updatePaginationControls();
+}
+
+// Update status tombol pagination
+function updatePaginationControls() {
+  const maxPage = Math.ceil(filteredData.length / pageSize) - 1;
+  prevPageBtn.disabled = currentPage <= 0;
+  nextPageBtn.disabled = currentPage >= maxPage || filteredData.length <= pageSize;
+}
+
+// Halaman berikutnya
+function nextPage() {
+  const dataArray = isSearchActive ? searchResults : filteredData;
+  if (dataArray.length === 0) return;
+  
+  const maxPage = Math.ceil(dataArray.length / pageSize) - 1;
+  if (currentPage < maxPage) {
+    currentPage++;
+    isSearchActive ? displaySearchResults() : displayPage();
+  } else {
+    currentPage = 0; // Kembali ke halaman pertama
+    isSearchActive ? displaySearchResults() : displayPage();
+  }
+}
+
+// Halaman sebelumnya
+function prevPage() {
+  if (currentPage > 0) {
+    currentPage--;
+    isSearchActive ? displaySearchResults() : displayPage();
+  }
+}
+
+// Helper untuk status warna dengan Tailwind
+function tailwindStatusClass(status) {
+  if (!status) return '';
+  status = status.toLowerCase();
+  if (status.includes("aman") || status.includes("✅")) return "bg-status-aman";
+  if (status.includes("belum") || status.includes("⚠️")) return "bg-status-belum";
+  if (status.includes("perlu") || status.includes("perbaikan") || status.includes("❌")) return "bg-status-perbaiki";
+  return "";
+}
+
+// Menampilkan dropdown status
+function showStatusDropdown(e) {
+  // Jeda pergantian halaman otomatis saat mengubah status
+  autoPageChange = false;
+  clearTimeout(window.resumeAutoPageTimeout);
+  
+  const cell = e.currentTarget;
+  currentCell = cell;
+  
+  const dropdown = document.getElementById('status-dropdown');
+  
+  // Dapatkan posisi sel
+  const rect = cell.getBoundingClientRect();
+  
+  dropdown.style.top = `${rect.bottom + window.scrollY}px`;
+  dropdown.style.left = `${rect.left}px`;
+  dropdown.style.width = `${rect.width}px`;
+  dropdown.classList.remove('hidden');
+  
+  // Event listener untuk menutup dropdown ketika klik di luar
+  document.addEventListener('click', closeDropdownOutside);
+}
+
+// Menutup dropdown jika klik di luar
+function closeDropdownOutside(e) {
+  const dropdown = document.getElementById('status-dropdown');
+  if (!dropdown.contains(e.target) && e.target !== currentCell) {
+    dropdown.classList.add('hidden');
+    document.removeEventListener('click', closeDropdownOutside);
+    
+    // Set timer untuk melanjutkan pergantian halaman otomatis
+    window.resumeAutoPageTimeout = setTimeout(() => {
+      autoPageChange = true;
+    }, 5000); // Lanjutkan pergantian halaman otomatis setelah 5 detik
+  }
+}
+
+// Event listener untuk opsi status
+document.querySelectorAll('.status-option').forEach(option => {
+  option.addEventListener('click', function() {
+    if (!currentCell) return;
+    
+    const month = currentCell.dataset.month;
+    const rowIndex = parseInt(currentCell.dataset.row);
+    const newStatus = this.dataset.status;
+    const isSearchResult = currentCell.dataset.search === "true";
+    
+    if (isSearchResult) {
+      // Update dalam hasil pencarian
+      searchResults[rowIndex][month] = newStatus;
+      
+      // Update dalam data asli juga berdasarkan Kode Satker
+      const kodeSatker = searchResults[rowIndex]["Kode Satker"];
+      const originalRow = allData.find(row => row && row["Kode Satker"] === kodeSatker);
+      if (originalRow) {
+        originalRow[month] = newStatus;
+        dataSaved = false;
+      }
+    } else {
+      // Update data terfilter
+      filteredData[rowIndex][month] = newStatus;
+      
+      // Update dalam data asli juga berdasarkan Kode Satker
+      const kodeSatker = filteredData[rowIndex]["Kode Satker"];
+      const originalRow = allData.find(row => row && row["Kode Satker"] === kodeSatker);
+      if (originalRow) {
+        originalRow[month] = newStatus;
+        dataSaved = false;
+      }
+    }
+    
+    // Update tampilan
+    currentCell.textContent = newStatus;
+    currentCell.className = `px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-center ${tailwindStatusClass(newStatus)} cursor-pointer hover:bg-gray-50`;
+    if (isSearchResult) {
+      currentCell.dataset.search = "true";
+    }
+    
+    // Tutup dropdown
+    document.getElementById('status-dropdown').classList.add('hidden');
+    document.removeEventListener('click', closeDropdownOutside);
+    
+    // Re-filter data untuk kasus jika semua status sudah aman (hanya jika bukan pencarian)
+    if (!isSearchActive) {
+      filterAndDisplayData();
+    }
+    
+    // Set timer untuk melanjutkan pergantian halaman otomatis
+    clearTimeout(window.resumeAutoPageTimeout);
+    window.resumeAutoPageTimeout = setTimeout(() => {
+      autoPageChange = true;
+    }, 5000);
+    
+    showNotification('✅ Status berhasil diupdate', 'success');
+  });
+});
+
+// Export ke Excel
+function exportToExcel() {
+  if (allData.length === 0) {
+    showNotification('⚠️ Tidak ada data untuk diekspor', 'warning');
+    return;
+  }
+  
+  // Dapatkan nama file dari path
+  const pathParts = lastLoadedFile.split('/');
+  const filename = pathParts[pathParts.length -.1].replace('.csv', '') || 'monitoring_caput';
+  
+  // Buat workbook baru
+  const wb = XLSX.utils.book_new();
+  
+  // Konversi data ke worksheet
+  const ws = XLSX.utils.json_to_sheet(allData);
+  
+  // Tambahkan worksheet ke workbook
+  XLSX.utils.book_append_sheet(wb, ws, "Monitoring Caput");
+  
+  // Export ke file Excel
+  XLSX.writeFile(wb, `${filename}.xlsx`);
+  showNotification('📥 Data berhasil diekspor ke Excel', 'success');
+}
+
+// Format tanggal dan waktu
+function formatDateTime(date) {
+  const options = { 
+    day: '2-digit', 
+    month: '2-digit', 
+    year: 'numeric', 
+    hour: '2-digit', 
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  };
+  return date.toLocaleString('id-ID', options);
+}
+
+// Menampilkan notifikasi
+function showNotification(message, type) {
+  const notification = document.getElementById('notification');
+  const notificationMessage = document.getElementById('notification-message');
+  const notificationIcon = document.getElementById('notification-icon');
+  
+  // Set pesan
+  notificationMessage.textContent = message;
+  
+  // Set icon berdasarkan tipe
+  let iconHtml = '';
+  switch(type) {
+    case 'success':
+      iconHtml = '<svg class="h-6 w-6 text-green-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>';
+      break;
+    case 'error':
+      iconHtml = '<svg class="h-6 w-6 text-red-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>';
+      break;
+    case 'warning':
+      iconHtml = '<svg class="h-6 w-6 text-yellow-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>';
+      break;
+    case 'info':
+    default:
+      iconHtml = '<svg class="h-6 w-6 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>';
+  }
+  notificationIcon.innerHTML = iconHtml;
+  
+  // Tampilkan notifikasi
+  notification.style.opacity = '1';
+  notification.style.transform = 'scale(1)';
+  
+  // Otomatis sembunyikan setelah 3 detik
+  setTimeout(() => {
+    notification.style.opacity = '0';
+    notification.style.transform = 'scale(0)';
+  }, 3000);
+}
+
+// Tutup notifikasi ketika tombol close diklik
+document.getElementById('close-notification').addEventListener('click', () => {
+  const notification = document.getElementById('notification');
+  notification.style.opacity = '0';
+  notification.style.transform = 'scale(0)';
+});
+
+// Event ketika pengguna akan meninggalkan halaman dengan data yang belum disimpan
+window.addEventListener('beforeunload', function(e) {
+  if (!dataSaved && allData.length > 0) {
+    const message = 'Anda memiliki perubahan yang belum disimpan. Apakah Anda yakin ingin meninggalkan halaman ini?';
+    e.returnValue = message;
+    return message;
+  }
+});
+</script>
+</body>
+</html>
